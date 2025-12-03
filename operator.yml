@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-sts
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rollout-operator
+  namespace: demo-sts
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rollout-operator
+  template:
+    metadata:
+      labels:
+        app: rollout-operator
+    spec:
+      serviceAccountName: rollout-operator
+      containers:
+        - name: operator
+          image: ttl.sh/rollout-operator:24h
+          imagePullPolicy: Always
+          env:
+            - name: ROLL_OP_TARGET_NAMESPACE
+              value: "demo-sts"
+            - name: ROLL_OP_TARGET_STATEFUL_SET
+              value: "demo-sts"
+            - name: ROLL_OP_ROLLOUT_DELAY_SECONDS
+              value: "600"       # 10 minutes
+            - name: ROLL_OP_ENABLE_HALF_SPLIT
+              value: "true"
+            - name: ROLL_OP_MAX_UNAVAILABLE
+              value: "2"
+            - name: ROLL_OP_COUNTDOWN_LOG_INTERVAL
+              value: "60"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rollout-operator
+  namespace: demo-sts
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rollout-operator
+  namespace: demo-sts
+rules:
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rollout-operator
+  namespace: demo-sts
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: rollout-operator
+subjects:
+  - kind: ServiceAccount
+    name: rollout-operator
+    namespace: rollout-operator

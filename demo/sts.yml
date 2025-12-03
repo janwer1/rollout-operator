@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: demo-sts
+  namespace: demo-sts
+spec:
+  serviceName: demo-sts
+  replicas: 32
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      app: demo-sts
+  template:
+    metadata:
+      labels:
+        app: demo-sts
+    spec:
+      containers:
+        - name: app
+          image: ttl.sh/demo-app:24h
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: PORT
+              value: "8080"
+            - name: STARTUP_DELAY_SECONDS
+              value: "30"
+          ports:
+            - name: http
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+      terminationGracePeriodSeconds: 30
