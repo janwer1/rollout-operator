@@ -1,7 +1,10 @@
-# Dockerfile.app
+# Dockerfile
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+
+ARG BUILD_TIME
+ENV BUILD_TIME=${BUILD_TIME}
 
 WORKDIR /app
 

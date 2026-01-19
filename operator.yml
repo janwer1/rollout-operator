@@ -19,23 +19,34 @@ spec:
         app: rollout-operator
     spec:
       serviceAccountName: rollout-operator
+      volumes:
+        - name: operator-code
+          configMap:
+            name: rollout-operator-code
       containers:
         - name: operator
-          image: ttl.sh/rollout-operator:24h
+          image: rollout-operator:test
           imagePullPolicy: Always
+          volumeMounts:
+            - name: operator-code
+              mountPath: /app/rollout_operator.py
+              subPath: rollout_operator.py
+              readOnly: true
           env:
-            - name: ROLL_OP_TARGET_NAMESPACE
+            - name: RO_TARGET_NAMESPACE
               value: "demo-sts"
-            - name: ROLL_OP_TARGET_STATEFUL_SET
+            - name: RO_TARGET_STATEFUL_SET
               value: "demo-sts"
-            - name: ROLL_OP_ROLLOUT_DELAY_SECONDS
-              value: "600"       # 10 minutes
-            - name: ROLL_OP_ENABLE_HALF_SPLIT
+            - name: RO_DELAY_SECONDS
+              value: "10"
+            - name: RO_ENABLE_HALF_SPLIT
               value: "true"
-            - name: ROLL_OP_MAX_UNAVAILABLE
+            - name: RO_MAX_UNAVAILABLE
               value: "2"
-            - name: ROLL_OP_COUNTDOWN_LOG_INTERVAL
+            - name: RO_COUNTDOWN_LOG_INTERVAL
               value: "60"
+            - name: RO_JSON_LOGS
+              value: "false"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -44,28 +55,29 @@ metadata:
   namespace: demo-sts
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: rollout-operator
-  namespace: demo-sts
 rules:
   - apiGroups: ["apps"]
     resources: ["statefulsets"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list", "watch", "delete"]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch", "delete", "create", "patch"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: rollout-operator
-  namespace: demo-sts
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: rollout-operator
 subjects:
   - kind: ServiceAccount
     name: rollout-operator
-    namespace: rollout-operator
+    namespace: demo-sts

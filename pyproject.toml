@@ -1,0 +1,34 @@
+[tool.poetry]
+name = "rollout-operator"
+version = "0.1.0"
+description = "Kopf operator for controlled OnDelete rollouts of StatefulSets"
+authors = ["Jan Werner"]
+readme = "README.md"
+packages = [{include = "rollout_operator.py"}]
+
+[tool.poetry.dependencies]
+python = "^3.13"
+kopf = "~1.38"
+kubernetes = "~34.1"
+pydantic = "~2.12"
+pydantic-settings = "~2.12"
+
+[tool.poetry.group.test.dependencies]
+pytest = "~8.3"
+pytest-asyncio = "~0.24"
+pytest-kubernetes = "~0.7"
+docker = "~7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests (pytest-kubernetes manages KinD cluster)",
+    "k8s: Kubernetes integration tests",
+]

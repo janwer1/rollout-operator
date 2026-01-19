@@ -19,13 +19,13 @@ spec:
     spec:
       containers:
         - name: app
-          image: ttl.sh/demo-app:24h
+          image: demo-app:test
           imagePullPolicy: IfNotPresent
           env:
             - name: PORT
               value: "8080"
             - name: STARTUP_DELAY_SECONDS
-              value: "30"
+              value: "2"
           ports:
             - name: http
               containerPort: 8080
@@ -43,4 +43,4 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 3
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 1
