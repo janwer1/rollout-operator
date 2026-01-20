@@ -10,43 +10,16 @@ StatefulSets are great for stable identities and ordering, but Kubernetes’ def
 
 In short: **it automatically deletes the right pods in the right order**, waits for readiness, and gives you knobs for delays and batching.
 
-## Purpose
+## How it works
 
-This operator is designed to provide **fast, controlled rollouts** for StatefulSets that use `updateStrategy.type=OnDelete`.
+Kubernetes updates the StatefulSet’s *template revision* when you change the pod template, but with `updateStrategy.type=OnDelete` it **won’t restart existing pods automatically**. This operator watches a single target StatefulSet, detects when `updateRevision != currentRevision`, and then drives the rollout by **deleting only pods that are still on the old revision** (the controller recreates them on the new revision).
 
-`OnDelete` is an “older” StatefulSet update strategy, but it’s still useful to **manually control when pods restart**: the StatefulSet controller will update the *template revision*, but **it will not restart pods for you**. You restart pods by deleting them, and the controller recreates them with the new revision.
+If `RO_ENABLE_HALF_SPLIT=true`, the operator plans the rollout in two ranges (upper first, then lower). For `N` replicas with ordinals `0..N-1`:
 
-This operator automates that “delete pods to roll out” workflow safely and repeatably.
+- **lower**: `0..(N//2 - 1)`
+- **upper**: `(N//2)..(N - 1)`
 
-### Why OnDelete + Parallel Pod Management?
-
-StatefulSets with `OnDelete` strategy don't automatically update pods when the template changes—you must delete pods to trigger recreation. When combined with `podManagementPolicy: Parallel`, rollouts can be **much faster** than the default sequential behavior because Kubernetes is allowed to bring up multiple pods at once.
-
-### Upper/Lower Split (Two Ranges)
-
-The “split” mode is the main feature: it rolls pods in two ranges (upper first, then lower).
-
-For a StatefulSet with `N` replicas and ordinals `0..N-1`:
-
-- The **lower half** is ordinals `0..(N//2 - 1)`
-- The **upper half** is ordinals `(N//2)..(N - 1)`
-
-The motivating use-case is a StatefulSet where pods are explicitly split into two groups, e.g.:
-
-- ordinals `0-15` have label `range=lower`
-- ordinals `16-31` have label `range=upper`
-
-With that setup, you can replace **all pods of one range at once** (fast rollout) while workloads remain available on the other range — just temporarily without redundancy.
-
-The operator rolls **upper first, then lower**, batching by `RO_MAX_UNAVAILABLE`, and waiting for readiness between batches.
-
-### Key Benefits
-
-- **Fast rollouts**: Parallel pod creation/deletion instead of sequential
-- **Controlled batching**: Configurable batch sizes with readiness checks
-- **Upper/lower split**: Rollout upper first then lower, enabling “one range at a time” updates
-- **Automatic detection**: Detects template revisions and schedules rollouts automatically
-- **Configurable delays**: Built-in countdown before rollout starts
+It deletes pods in batches up to `RO_MAX_UNAVAILABLE`, waits for readiness after each batch, and (optionally) waits `RO_DELAY_SECONDS` before starting. For faster rollouts, use `podManagementPolicy: Parallel`.
 
 ## Features
 
