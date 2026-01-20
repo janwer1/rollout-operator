@@ -19,19 +19,10 @@ spec:
         app: rollout-operator
     spec:
       serviceAccountName: rollout-operator
-      volumes:
-        - name: operator-code
-          configMap:
-            name: rollout-operator-code
       containers:
         - name: operator
           image: rollout-operator:test
-          imagePullPolicy: Always
-          volumeMounts:
-            - name: operator-code
-              mountPath: /app/rollout_operator.py
-              subPath: rollout_operator.py
-              readOnly: true
+          imagePullPolicy: IfNotPresent
           env:
             - name: RO_TARGET_NAMESPACE
               value: "demo-sts"

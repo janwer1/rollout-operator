@@ -88,53 +88,94 @@ The pytest-kubernetes plugin will:
 **Prerequisites:**
 
 - Docker installed and running
-- Docker Hub account (logged in via `docker login`)
 - `kind` installed (`brew install kind` or see [kind docs](https://kind.sigs.k8s.io/))
 - `kubectl` installed
 
 **Quick Start:**
 
-1. **Set your Docker Hub username** (optional, will try to auto-detect):
+1. **Build local images**:
 
    ```bash
-   export DOCKER_USER=your-dockerhub-username
+   docker build -t rollout-operator:test .
+   docker build -t demo-app:test -f demo/Dockerfile demo
    ```
 
-2. **Run the full test suite**:
+2. **Create kind cluster**:
 
    ```bash
-   ./run-tests.sh
+   kind create cluster --name rollout-operator-test
    ```
 
-   This will:
-   - Build and push operator and demo images to Docker Hub
-   - Create a kind cluster
-   - Deploy the operator
-   - Deploy a demo StatefulSet with 32 replicas
-   - Wait for everything to be ready
-
-3. **Test a rollout**:
+3. **Load images into kind** (no push needed):
 
    ```bash
-   ./test-rollout.sh
+   kind load docker-image rollout-operator:test --name rollout-operator-test
+   kind load docker-image demo-app:test --name rollout-operator-test
    ```
 
-   Or manually trigger a rollout:
+4. **Deploy operator + demo**:
+
+   ```bash
+   kubectl apply -f operator.yml
+   kubectl apply -f demo/sts.yml
+   ```
+
+5. **Watch it**:
+
+   ```bash
+   kubectl get pods -n demo-sts -w
+   kubectl logs -f deployment/rollout-operator -n demo-sts
+   ```
+
+6. **Trigger a rollout**:
 
    ```bash
    kubectl patch sts demo-sts -n demo-sts -p '{"spec":{"template":{"metadata":{"annotations":{"test":"'$(date +%s)'"}}}}}'
    ```
 
-4. **Debug the operator**:
+**Using the test scripts:**
+
+The `run-tests.sh` script automates the above steps. It builds images locally and loads them into kind (no Docker Hub push needed unless you set `PUSH_IMAGES=true`):
+
+```bash
+./scripts/run-tests.sh
+```
+
+### Manual Testing with OrbStack (or any existing kube context)
+
+If you already have a local cluster running (e.g. OrbStack), you can use **local Docker images** and apply the manifests directly.
+
+1. **Make sure you’re on the right context**:
 
    ```bash
-   ./debug-operator.sh
+   kubectl config current-context
    ```
 
-5. **Watch operator logs**:
+2. **Build local images** (matching the tags used in `operator.yml` and `demo/sts.yml`):
 
    ```bash
+   docker build -t rollout-operator:test .
+   docker build -t demo-app:test -f demo/Dockerfile demo
+   ```
+
+3. **Deploy operator + demo**:
+
+   ```bash
+   kubectl apply -f operator.yml
+   kubectl apply -f demo/sts.yml
+   ```
+
+4. **Watch it**:
+
+   ```bash
+   kubectl get pods -n demo-sts -w
    kubectl logs -f deployment/rollout-operator -n demo-sts
+   ```
+
+5. **Trigger a rollout**:
+
+   ```bash
+   kubectl patch sts demo-sts -n demo-sts -p '{"spec":{"template":{"metadata":{"annotations":{"test":"'$(date +%s)'"}}}}}'
    ```
 
 ### Local Testing (for Development)
@@ -159,10 +200,11 @@ Make sure you have:
 
 ### Manual Testing Steps
 
-1. **Build and push images**:
+1. **Build local images**:
 
    ```bash
-   ./build-images.sh
+   docker build -t rollout-operator:test .
+   docker build -t demo-app:test -f demo/Dockerfile demo
    ```
 
 2. **Create kind cluster** (if not using run-tests.sh):
@@ -174,21 +216,19 @@ Make sure you have:
 3. **Load images into kind**:
 
    ```bash
-   kind load docker-image $DOCKER_USER/rollout-operator:test --name rollout-operator-test
-   kind load docker-image $DOCKER_USER/demo-app:test --name rollout-operator-test
+   kind load docker-image rollout-operator:test --name rollout-operator-test
+   kind load docker-image demo-app:test --name rollout-operator-test
    ```
 
 4. **Deploy operator**:
 
    ```bash
-   # Update image name in operator.yml first, then:
    kubectl apply -f operator.yml
    ```
 
 5. **Deploy demo StatefulSet**:
 
    ```bash
-   # Update image name in demo/sts.yml first, then:
    kubectl apply -f demo/sts.yml
    ```
 
@@ -213,22 +253,3 @@ Make sure you have:
 - Check pod logs: `kubectl logs <pod-name> -n demo-sts`
 - Verify readiness probes are working
 - Check if STARTUP_DELAY_SECONDS is too long
-
-## Files
-
-- `rollout_operator.py` - Main operator code
-- `operator.yml` - Kubernetes manifests for the operator
-- `demo/sts.yml` - Demo StatefulSet for testing
-- `demo/app.py` - Simple HTTP server for demo pods
-- `run-tests.sh` - Full test suite with kind
-- `test-local.sh` - Local testing script
-- `test-rollout.sh` - Test rollout functionality
-- `debug-operator.sh` - Debug information script
-- `build-images.sh` - Build and push Docker images
-
-## Recent Fixes
-
-- Fixed RoleBinding namespace bug (was pointing to wrong namespace)
-- Improved template hash detection with fallback computation
-- Added support for local kubeconfig (for development)
-- Fixed unused variable warnings
