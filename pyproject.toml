@@ -12,6 +12,7 @@ kopf = "~1.38"
 kubernetes = "~34.1"
 pydantic = "~2.12"
 pydantic-settings = "~2.12"
+rich = "~13.9"
 
 [tool.poetry.group.test.dependencies]
 pytest = "~8.3"

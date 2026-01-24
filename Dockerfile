@@ -37,4 +37,4 @@ COPY rollout_operator.py .
 
 USER k8s-operator
 
-ENTRYPOINT ["kopf", "run", "--standalone", "rollout_operator.py"]
+ENTRYPOINT ["kopf", "run", "--standalone", "--all-namespaces", "rollout_operator.py"]

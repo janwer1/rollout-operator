@@ -27,6 +27,7 @@ Env vars (all prefixed with RO_):
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -67,7 +68,7 @@ logging.getLogger("kopf.objects").addFilter(LogMessageFilter([
 # Structured Logging
 # =========================
 
-def log_structured(logger, level: str, event: str, message: str, json_logs: bool = False, create_event: bool = False, **kwargs):
+def log_structured(logger, level: str, event: str, message: str, json_logs: bool = False, create_event: bool = False, event_message: Optional[str] = None, **kwargs):
     """
     Log with structured data, optionally as JSON.
     
@@ -75,9 +76,11 @@ def log_structured(logger, level: str, event: str, message: str, json_logs: bool
         logger: Logger to use (Kopf logger creates events, standard logger doesn't)
         level: Log level (info, debug, etc.)
         event: Event type name
-        message: Log message
+        message: Log message (can contain emojis, used for operator logs)
         json_logs: Whether to output JSON format
         create_event: If True, use logger (creates K8s event), else use standard logger (no event)
+        event_message: Optional plain text message for Kubernetes Events (emoji-free). 
+                       If None and create_event=True, uses message but strips emojis.
     """
     data = {
         "event": event,
@@ -90,9 +93,22 @@ def log_structured(logger, level: str, event: str, message: str, json_logs: bool
         # Human-readable format with emojis
         log_msg = message
     
-    # Use standard logger for verbose logs (no events), Kopf logger for important milestones (creates events)
-    target_logger = logger if create_event else _verbose_logger
-    getattr(target_logger, level)(log_msg)
+    if create_event:
+        # For Kubernetes Events: use event_message if provided, otherwise strip emojis from message
+        if event_message is None:
+            # Simple emoji stripping: remove common emoji patterns
+            event_msg = re.sub(r'[🔍📅🚀📊📦🗑️⏳✅⏭️🔄🎉⚠️]', '', message).strip()
+            # Clean up any double spaces
+            event_msg = re.sub(r'\s+', ' ', event_msg)
+        else:
+            event_msg = event_message
+        
+        # Emit both: Event (emoji-free) and log (with emojis)
+        getattr(logger, level)(event_msg)  # Kubernetes Event
+        _verbose_logger.info(log_msg)  # Operator log with emojis
+    else:
+        # Use standard logger for verbose logs (no events)
+        _verbose_logger.info(log_msg)
 
 
 # =========================
@@ -162,6 +178,20 @@ class RolloutState:
 ROLL_ANNOTATION_STATE = "rollout-operator/state"
 ROLL_ANNOTATION_REVISION = "rollout-operator/last-revision"
 ROLL_ANNOTATION_PLANNED_AT = "rollout-operator/planned-at"
+ROLL_ANNOTATION_STARTED_AT = "rollout-operator/started-at"
+ROLL_ANNOTATION_UPDATED_AT = "rollout-operator/updated-at"
+ROLL_ANNOTATION_REPLICAS = "rollout-operator/replicas"
+ROLL_ANNOTATION_MAX_UNAVAILABLE = "rollout-operator/max-unavailable"
+ROLL_ANNOTATION_HALF_SPLIT = "rollout-operator/half-split"
+ROLL_ANNOTATION_TARGET_REVISION = "rollout-operator/target-revision"
+ROLL_ANNOTATION_RANGE_NAME = "rollout-operator/range-name"
+ROLL_ANNOTATION_RANGE_INDEX = "rollout-operator/range-index"
+ROLL_ANNOTATION_RANGE_TOTAL = "rollout-operator/range-total"
+ROLL_ANNOTATION_BATCH_INDEX = "rollout-operator/batch-index"
+ROLL_ANNOTATION_BATCH_TOTAL = "rollout-operator/batch-total"
+ROLL_ANNOTATION_CURRENT_BATCH_ORDINALS = "rollout-operator/current-batch-ordinals"
+ROLL_ANNOTATION_PODS_TO_UPDATE = "rollout-operator/pods-to-update"
+ROLL_ANNOTATION_PODS_DELETED = "rollout-operator/pods-deleted"
 
 ROLL_STATE_NONE = "none"
 ROLL_STATE_PLANNED = "planned"
@@ -233,6 +263,20 @@ def set_annotations_patch(
     state: Optional[str] = None,
     last_revision: Optional[str] = None,
     planned_at: Optional[str] = None,
+    started_at: Optional[str] = None,
+    updated_at: Optional[str] = None,
+    replicas: Optional[int] = None,
+    max_unavailable: Optional[int] = None,
+    half_split: Optional[bool] = None,
+    target_revision: Optional[str] = None,
+    range_name: Optional[str] = None,
+    range_index: Optional[int] = None,
+    range_total: Optional[int] = None,
+    batch_index: Optional[int] = None,
+    batch_total: Optional[int] = None,
+    current_batch_ordinals: Optional[List[int]] = None,
+    pods_to_update: Optional[int] = None,
+    pods_deleted: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build a JSON patch to update StatefulSet annotations."""
     patch: Dict[str, Any] = {"metadata": {"annotations": {}}}
@@ -243,6 +287,34 @@ def set_annotations_patch(
         ann[ROLL_ANNOTATION_REVISION] = last_revision
     if planned_at is not None:
         ann[ROLL_ANNOTATION_PLANNED_AT] = planned_at
+    if started_at is not None:
+        ann[ROLL_ANNOTATION_STARTED_AT] = started_at
+    if updated_at is not None:
+        ann[ROLL_ANNOTATION_UPDATED_AT] = updated_at
+    if replicas is not None:
+        ann[ROLL_ANNOTATION_REPLICAS] = str(replicas)
+    if max_unavailable is not None:
+        ann[ROLL_ANNOTATION_MAX_UNAVAILABLE] = str(max_unavailable)
+    if half_split is not None:
+        ann[ROLL_ANNOTATION_HALF_SPLIT] = str(half_split).lower()
+    if target_revision is not None:
+        ann[ROLL_ANNOTATION_TARGET_REVISION] = target_revision
+    if range_name is not None:
+        ann[ROLL_ANNOTATION_RANGE_NAME] = range_name
+    if range_index is not None:
+        ann[ROLL_ANNOTATION_RANGE_INDEX] = str(range_index)
+    if range_total is not None:
+        ann[ROLL_ANNOTATION_RANGE_TOTAL] = str(range_total)
+    if batch_index is not None:
+        ann[ROLL_ANNOTATION_BATCH_INDEX] = str(batch_index)
+    if batch_total is not None:
+        ann[ROLL_ANNOTATION_BATCH_TOTAL] = str(batch_total)
+    if current_batch_ordinals is not None:
+        ann[ROLL_ANNOTATION_CURRENT_BATCH_ORDINALS] = json.dumps(current_batch_ordinals)
+    if pods_to_update is not None:
+        ann[ROLL_ANNOTATION_PODS_TO_UPDATE] = str(pods_to_update)
+    if pods_deleted is not None:
+        ann[ROLL_ANNOTATION_PODS_DELETED] = str(pods_deleted)
     return patch
 
 
@@ -362,20 +434,26 @@ async def wait_pods_ready(
 
             if set(ready_ordinals) == set(ordinals):
                 elapsed = int(time.time() - start_time)
-                log(f"  ✅ All {len(ordinals)} pods ready after {elapsed}s")
+                log(f"Batch ready: {len(ready_ordinals)}/{len(ordinals)} replacement pods Ready in {elapsed}s")
                 return
             
             # Log progress every 10 seconds
             now = time.time()
             if now - last_log_time >= 10:
-                log(f"  ⏳ {len(ready_ordinals)}/{len(ordinals)} pods ready. Waiting for: {', '.join(not_ready_pods[:3])}{'...' if len(not_ready_pods) > 3 else ''}")
+                waiting_for = ', '.join(not_ready_pods[:3])
+                if len(not_ready_pods) > 3:
+                    waiting_for += f'... (+{len(not_ready_pods) - 3} more)'
+                log(f"Progress: {len(ready_ordinals)}/{len(ordinals)} replacement pods Ready. Waiting for: {waiting_for}")
                 last_log_time = now
         else:
             # Not all pods created yet
             now = time.time()
             if now - last_log_time >= 10:
                 missing = set(ordinals) - set(found_pods.keys())
-                log(f"  ⏳ Waiting for {len(missing)} pods to be created (missing ordinals: {sorted(missing)[:5]}{'...' if len(missing) > 5 else ''})")
+                created_count = len(found_pods)
+                missing_list = sorted(missing)[:5]
+                missing_str = f"{missing_list}{'...' if len(missing) > 5 else ''}"
+                log(f"Pods not created yet: {len(missing)}/{len(ordinals)} (ordinals {missing_str}). Created: {created_count}/{len(ordinals)}")
                 last_log_time = now
 
         await asyncio.sleep(poll)
@@ -445,14 +523,24 @@ class RolloutExecutor:
             skipped_count=len(already_updated),
         )
     
-    async def wait_batch_ready(self, ordinals: List[int]) -> None:
+    async def wait_batch_ready(self, ordinals: List[int], range_name: str, range_idx: int, total_ranges: int, batch_idx: int, total_batches: int, completed_in_range: int, total_in_range: int) -> None:
         """Wait for new pods to become ready."""
+        # Build context prefix for log messages
+        if total_ranges > 1:
+            context_prefix = f"[{self.ctx.namespace}/{self.ctx.name}] Range {range_idx}/{total_ranges} ({range_name}), Batch {batch_idx}/{total_batches} (ordinals {ordinals}): "
+        else:
+            context_prefix = f"[{self.ctx.namespace}/{self.ctx.name}] Batch {batch_idx}/{total_batches} (ordinals {ordinals}): "
+        
+        # Use _verbose_logger instead of ctx.logger to avoid creating Kubernetes Events
+        def log_fn(msg: str) -> None:
+            _verbose_logger.info(f"{context_prefix}{msg}")
+        
         await wait_pods_ready(
             self.core,
             self.ctx.namespace,
             self.ctx.name,
             ordinals,
-            logger=lambda msg: self.ctx.logger.info(f"[{self.ctx.namespace}/{self.ctx.name}]     {msg}")
+            logger=log_fn
         )
     
     def check_for_new_revision(self) -> Optional[str]:
@@ -512,9 +600,24 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
         )
 
     total_ranges = len(ranges)
+    pods_deleted_total = 0
     for range_idx, (range_name, range_ordinals) in enumerate(zip(range_names, ranges), 1):
         if not range_ordinals:
             continue
+
+        # Update annotations for range start
+        now = int(time.time())
+        progress_patch = set_annotations_patch(
+            range_name=range_name,
+            range_index=range_idx,
+            range_total=total_ranges,
+            updated_at=str(now),
+        )
+        sts_api.patch_namespaced_stateful_set(
+            name=ctx.name,
+            namespace=ctx.namespace,
+            body=progress_patch,
+        )
 
         log_structured(
             ctx.logger, "info",
@@ -533,6 +636,17 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
 
         batches = batch_ordinals(range_ordinals, ctx.settings.max_unavailable)
         total_batches = len(batches)
+        # Update batch_total annotation
+        now = int(time.time())
+        progress_patch = set_annotations_patch(
+            batch_total=total_batches,
+            updated_at=str(now),
+        )
+        sts_api.patch_namespaced_stateful_set(
+            name=ctx.name,
+            namespace=ctx.namespace,
+            body=progress_patch,
+        )
         log_structured(
             ctx.logger, "info",
             "rollout_batches_created",
@@ -557,13 +671,21 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
                     f"{original_target_revision} → {current_update_revision}. Restarting rollout...",
                     json_logs=ctx.settings.json_logs,
                     create_event=True,  # Major milestone
+                    event_message=f"[{ctx.namespace}/{ctx.name}] New revision detected during rollout: {original_target_revision} → {current_update_revision}. Restarting rollout...",
                     namespace=ctx.namespace,
                     statefulset=ctx.name,
                     old_revision=original_target_revision,
                     new_revision=current_update_revision,
                 )
                 # Update annotation to track new revision, keep state as ROLLING
-                patch.update(set_annotations_patch(last_revision=current_update_revision))
+                now = int(time.time())
+                patch.update(
+                    set_annotations_patch(
+                        last_revision=current_update_revision,
+                        target_revision=current_update_revision,
+                        updated_at=str(now),
+                    )
+                )
                 return  # Exit - next invocation will restart with new revision
             
             # Get pod names before deletion for logging
@@ -574,8 +696,34 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
                 if p.metadata and get_ordinal(p, ctx.name) in batch and pod_needs_update(p, ctx.target_revision)
             ]
             
+            # Update annotations before deleting batch
+            now = int(time.time())
+            progress_patch = set_annotations_patch(
+                batch_index=batch_idx,
+                current_batch_ordinals=batch,
+                updated_at=str(now),
+            )
+            sts_api.patch_namespaced_stateful_set(
+                name=ctx.name,
+                namespace=ctx.namespace,
+                body=progress_patch,
+            )
+            
             # Process batch
             result = await executor.delete_batch(batch, ctx.target_revision)
+            
+            # Update pods_deleted count
+            pods_deleted_total += result.deleted_count
+            now = int(time.time())
+            progress_patch = set_annotations_patch(
+                pods_deleted=pods_deleted_total,
+                updated_at=str(now),
+            )
+            sts_api.patch_namespaced_stateful_set(
+                name=ctx.name,
+                namespace=ctx.namespace,
+                body=progress_patch,
+            )
             
             if result.deleted_count == 0:
                 if result.skipped_count > 0:
@@ -636,10 +784,31 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
                 batch_ordinals=batch,
             )
             
-            await executor.wait_batch_ready(batch)
-            
-            # Count completed pods in this range
+            # Count completed pods in this range before waiting
             completed_in_range = sum(len(b) for b in batches[:batch_idx])
+            await executor.wait_batch_ready(
+                batch,
+                range_name=range_name,
+                range_idx=range_idx,
+                total_ranges=total_ranges,
+                batch_idx=batch_idx,
+                total_batches=total_batches,
+                completed_in_range=completed_in_range,
+                total_in_range=len(range_ordinals)
+            )
+            
+            # Count completed pods in this range (after waiting)
+            completed_in_range = sum(len(b) for b in batches[:batch_idx])
+            # Update annotation after batch is ready
+            now = int(time.time())
+            progress_patch = set_annotations_patch(
+                updated_at=str(now),
+            )
+            sts_api.patch_namespaced_stateful_set(
+                name=ctx.name,
+                namespace=ctx.namespace,
+                body=progress_patch,
+            )
             log_structured(
                 ctx.logger, "info",
                 "rollout_batch_ready",
@@ -673,13 +842,23 @@ async def _execute_rollout(executor: RolloutExecutor, original_target_revision: 
             outdated_pods=outdated_names,
         )
     
-    patch.update(set_annotations_patch(state=ROLL_STATE_DONE, last_revision=ctx.target_revision))
+    now = int(time.time())
+    patch.update(
+        set_annotations_patch(
+            state=ROLL_STATE_DONE,
+            last_revision=ctx.target_revision,
+            target_revision=ctx.target_revision,
+            current_batch_ordinals=[],  # Clear current batch
+            updated_at=str(now),
+        )
+    )
     log_structured(
         ctx.logger, "info",
         "rollout_completed",
         f"[{ctx.namespace}/{ctx.name}] 🎉 Rollout completed successfully! All {ctx.replicas} pods updated to revision {ctx.target_revision}.",
         json_logs=ctx.settings.json_logs,
         create_event=True,  # Major milestone - create K8s event
+        event_message=f"[{ctx.namespace}/{ctx.name}] Rollout completed successfully. All {ctx.replicas} pods updated to revision {ctx.target_revision}.",
         namespace=ctx.namespace,
         statefulset=ctx.name,
         update_revision=ctx.target_revision,
@@ -782,10 +961,16 @@ async def check_rollout_timer(meta, logger, **kwargs):
             f"[{namespace}/{name}] ✅ Rollout delay elapsed. Starting rollout now...",
             json_logs=settings.json_logs,
             create_event=True,  # Major milestone - create K8s event
+            event_message=f"[{namespace}/{name}] Rollout delay elapsed. Starting rollout now...",
             namespace=namespace,
             statefulset=name,
         )
-        patch = set_annotations_patch(state=ROLL_STATE_ROLLING)
+        now = int(time.time())
+        patch = set_annotations_patch(
+            state=ROLL_STATE_ROLLING,
+            started_at=str(now),
+            updated_at=str(now),
+        )
         sts_api.patch_namespaced_stateful_set(
             name=name,
             namespace=namespace,
@@ -905,11 +1090,20 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
 
     if state in [ROLL_STATE_NONE, ROLL_STATE_DONE] and rollout_needed:
         planned_at = now
+        # Get replicas from spec
+        replicas = spec.get("replicas", 0) if spec else ((sts.spec.replicas if sts.spec else None) or 0)
         patch.update(
             set_annotations_patch(
                 state=ROLL_STATE_PLANNED,
                 last_revision=update_revision,
                 planned_at=str(planned_at),
+                replicas=replicas,
+                max_unavailable=settings.max_unavailable,
+                half_split=settings.enable_half_split,
+                target_revision=update_revision,
+                pods_to_update=0,
+                pods_deleted=0,
+                updated_at=str(now),
             )
         )
         log_structured(
@@ -918,6 +1112,7 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
             f"[{namespace}/{name}] 🔍 New revision detected! Revision: {current_revision} → {update_revision}",
             json_logs=settings.json_logs,
             create_event=True,  # Major milestone - create K8s event
+            event_message=f"[{namespace}/{name}] New revision detected: {current_revision} → {update_revision}",
             namespace=namespace,
             statefulset=name,
             current_revision=current_revision,
@@ -930,6 +1125,7 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
             f"({settings.delay_seconds // 60} minutes). Countdown will be logged every {settings.countdown_log_interval}s",
             json_logs=settings.json_logs,
             create_event=True,  # Major milestone - create K8s event
+            event_message=f"[{namespace}/{name}] Rollout scheduled: Will start in {settings.delay_seconds}s ({settings.delay_seconds // 60} minutes). Countdown will be logged every {settings.countdown_log_interval}s",
             namespace=namespace,
             statefulset=name,
             delay_seconds=settings.delay_seconds,
@@ -966,6 +1162,13 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
         pods = current_pods(core_api, sts)
         pods_needing_update = [p for p in pods if pod_needs_update(p, update_revision)]
         
+        # Update pods_to_update annotation
+        now = int(time.time())
+        patch.update(set_annotations_patch(
+            pods_to_update=len(pods_needing_update),
+            updated_at=str(now),
+        ))
+        
         if not pods_needing_update:
             # All pods already on target revision - mark as done
             log_structured(
@@ -974,11 +1177,21 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
                 f"[{namespace}/{name}] ✅ All pods already on target revision {update_revision}. Marking rollout complete.",
                 json_logs=settings.json_logs,
                 create_event=True,  # Major milestone - create K8s event
+                event_message=f"[{namespace}/{name}] All pods already on target revision {update_revision}. Marking rollout complete.",
                 namespace=namespace,
                 statefulset=name,
                 update_revision=update_revision,
             )
-            patch.update(set_annotations_patch(state=ROLL_STATE_DONE, last_revision=update_revision))
+            now = int(time.time())
+            patch.update(
+                set_annotations_patch(
+                    state=ROLL_STATE_DONE,
+                    last_revision=update_revision,
+                    target_revision=update_revision,
+                    current_batch_ordinals=[],
+                    updated_at=str(now),
+                )
+            )
             return
 
         # Create executor and execute rollout
@@ -1000,7 +1213,8 @@ async def on_sts_change(spec, meta, status, diff, patch, logger, **kwargs):
             f"half_split: {settings.enable_half_split}",
             json_logs=settings.json_logs,
             create_event=True,  # Major milestone - create K8s event
-                            namespace=namespace,
+            event_message=f"[{namespace}/{name}] Starting rollout to revision {update_revision}. Pods to update: {len(pods_needing_update)}/{replicas}, max_unavailable: {settings.max_unavailable}, half_split: {settings.enable_half_split}",
+            namespace=namespace,
             statefulset=name,
             update_revision=update_revision,
             pods_to_update=len(pods_needing_update),

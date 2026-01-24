@@ -253,3 +253,110 @@ Make sure you have:
 - Check pod logs: `kubectl logs <pod-name> -n demo-sts`
 - Verify readiness probes are working
 - Check if STARTUP_DELAY_SECONDS is too long
+
+## Monitoring Rollout Progress
+
+The operator persists rollout progress in StatefulSet annotations, making it easy to monitor rollouts even during long-running operations.
+
+### Using kubectl
+
+You can view rollout progress directly via kubectl:
+
+```bash
+# View all rollout annotations
+kubectl get sts <sts-name> -n <namespace> -o jsonpath='{.metadata.annotations}' | jq
+
+# View specific progress fields
+kubectl get sts <sts-name> -n <namespace> -o jsonpath='{.metadata.annotations.rollout-operator/state}'
+kubectl get sts <sts-name> -n <namespace> -o jsonpath='{.metadata.annotations.rollout-operator/batch-index}'
+kubectl get sts <sts-name> -n <namespace> -o jsonpath='{.metadata.annotations.rollout-operator/current-batch-ordinals}'
+
+# Watch pod status during rollout
+kubectl get pods -n <namespace> -l <sts-selector> -w
+```
+
+### Using the Rich TUI
+
+For a live, visual dashboard of rollout progress, use the included Rich TUI script:
+
+```bash
+# Run the TUI (requires rich dependency)
+poetry run python scripts/rollout_tui.py --namespace <namespace> --sts <sts-name>
+```
+
+The TUI uses Kubernetes watch API for real-time updates - it will refresh immediately when StatefulSet annotations or pod status changes.
+
+The TUI displays a state-aware dashboard that clearly answers:
+- **Is there any rollout work pending?**
+- **Is a rollout currently in progress?**
+- **If idle/done, what was the last known rollout/revision context?**
+
+### TUI States
+
+The TUI shows different information depending on the rollout state:
+
+#### Idle (Nothing to do)
+- **Status**: "Nothing to do"
+- **Summary**: "All pods NEW+Ready (N/N)"
+- Shows current revision and last update time
+- Hides irrelevant fields (pods deleted, batch info)
+
+**Definition**: "Nothing to do" means all pods are on the `updateRevision` AND Ready. This is computed from live Kubernetes state, not just operator annotations.
+
+#### Scheduled
+- **Status**: "Scheduled"
+- **Summary**: Shows how many pods need update, how many are ready on old revision
+- Shows countdown/planned timestamp
+- Shows planned rollout parameters (max unavailable, half split)
+
+#### Rolling (In Progress)
+- **Status**: "Rolling"
+- **Summary**: "Old->New progress: NEW+Ready a/b, Remaining r"
+- Shows active range and batch information
+- Shows current batch ordinals
+- Hides cumulative pods_deleted (replaced with computed progress)
+
+#### NeedsAction (Drift detected)
+- **Status**: "Update detected, operator idle"
+- **Summary**: Shows what's outdated/not ready
+- Indicates that Kubernetes shows work needed but operator annotations indicate no active rollout
+
+### Pod Grid
+
+The pod grid shows each pod ordinal with clear status indicators:
+- **🚧** = Currently being worked on (in current batch)
+- **NEW** = On target revision
+- **OLD** = On old revision (needs update)
+- **REV?** = Revision state unknown
+- **✅** = Ready
+- **⏳** = Not ready
+- **MISS** = Pod not found
+
+When half-split is enabled, pods are grouped into **Upper** and **Lower** sections, each showing:
+- Section status: **Done** (all NEW+Ready), **Active** (currently rolling), or **Queued** (waiting)
+- NEW+Ready progress: "NEW+Ready x/y"
+- Detailed counts: NEW, OLD, REV?, Ready, NotReady, MISS
+
+The grid automatically adjusts to the number of replicas (works for any size, not just 32 pods).
+
+### Rollout Annotations
+
+The operator stores the following annotations on the target StatefulSet:
+
+- `rollout-operator/state`: Current rollout state (none/planned/rolling/done)
+- `rollout-operator/last-revision`: Last processed revision
+- `rollout-operator/planned-at`: Timestamp when rollout was planned
+- `rollout-operator/started-at`: Timestamp when rollout started
+- `rollout-operator/updated-at`: Timestamp of last progress update
+- `rollout-operator/replicas`: Number of replicas
+- `rollout-operator/max-unavailable`: Max unavailable pods setting
+- `rollout-operator/half-split`: Whether half-split is enabled
+- `rollout-operator/target-revision`: Target revision for current rollout
+- `rollout-operator/range-name`: Current range name (upper_range/lower_range/all)
+- `rollout-operator/range-index`: Current range index (1-based)
+- `rollout-operator/range-total`: Total number of ranges
+- `rollout-operator/batch-index`: Current batch index (1-based)
+- `rollout-operator/batch-total`: Total number of batches
+- `rollout-operator/current-batch-ordinals`: JSON array of ordinals in current batch
+- `rollout-operator/pods-to-update`: Number of pods needing update
+- `rollout-operator/pods-deleted`: Cumulative pods deleted in this rollout
